@@ -3,10 +3,9 @@ set -e
 
 
 
-# Variables
-win10ISO=$(mdfind 'win 10 .iso' | head -n 1)
-usbDrive=$(diskutil list | sed -n 's|^/dev/\(disk[0-9]*\).*|\1|p' | tail -n 1)
-usbDriveName=$(df | sed -n "s|^/dev/$usbDrives[0-9]*\(.*\).*|\1|p" | tail -n 1 | sed -n 's|.*/\(.*\)$|\1|p')
+# Properties
+vers='v0.7'
+versDate='2020-05-17'
 
 # Statics
 red=$'\e[1;31m'
@@ -26,148 +25,161 @@ rsltMsg="${grn}✔${end}\n"
 nwLnMsg='\n\n---\n\n\n'
 
 # Functions
-while getopts 'av' 2> /dev/null flag
+function get_input {
+	if ! [[ -z "${3}" ]]
+	then
+		local msg=$(printf -- "${quesEMsg}" "${1}" "${2}" "${3}")
+	else
+		local msg=$(printf -- "${quesMsg}" "${1}" "${2}")
+	fi
+	read -p "${msg}"
+	REPLY=$(printf -- '%s' "${REPLY}" | tail -n 1 | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')
+	if ! [[ -z "${REPLY}" ]]
+	then
+		printf -- '%s' "${REPLY}"
+	else
+		printf -- '%s' "${2}"
+	fi
+}
+function raise_error {
+	if ! [[ -z "${3}" ]]
+	then
+		local msg=$(printf -- "${erroEMsg}" "${1}" "${2}" "${3}")
+	else
+		local msg=$(printf -- "${erroMsg}" "${1}" "${2}")
+	fi
+	printf -- '%s\n' "${msg}" 1>&2
+	if ! [[ -z "${4}" ]]
+	then
+		printf -- '%s\n' "${4}" 1>&2
+	fi
+	exit 1
+}
+function raise_sig_error {
+	printf -- '\n'
+	raise_error "${1}" "${2}" "${3}"
+}
+while getopts 'av' flag 2> /dev/null
 do
 	case "${flag}" in
-		a) printf '%s\n' 'Author: ionysos (https://ionysos.github.io/)'
+		a) printf -- '%s\n' 'Author: ionysos (https://ionysos.github.io/)'
 		   exit 0;;
-		v) printf '%s\n%s\n%s\n' 'Version: v0.6 (2020-05-15)' \
+		v) printf -- '%s\n%s\n%s\n' "Version: ${vers} (${versDate})" \
 		   "$(basename -- $0) (https://github.com/ionysos/macOS-tools/blob/master/bootable-usb-win10.sh)" \
 		   'License: MIT (https://github.com/ionysos/macOS-tools/blob/master/LICENSE)'
 		   exit 0;;
-		*) printf "$erroMsg" 'Flag not supported' "a', 'v"
-		   exit 1;;
+		*) raise_error 'Flag not supported' "-a', '-v";;
 	esac
 done
-function get_input {
-	if ! [[ -z "$3" ]]
-	then
-		local msg=$(printf "$quesEMsg" "$1" "$2" "$3")
-	else
-		local msg=$(printf "$quesMsg" "$1" "$2")
-	fi
-	read -p "$msg"
-	REPLY=$(printf "$REPLY" | tail -n 1 | sed -e 's/^[[:space:]]*//g' -e 's/[[:space:]]*$//g')
-	if ! [[ -z "$REPLY" ]]
-	then
-		printf "$REPLY"
-	else
-		printf "$2"
-	fi
-}
+trap "raise_sig_error 'Unknown error' 'NONE'" SIGHUP
+trap "raise_sig_error 'User abortion' 'NONE'" SIGINT SIGTERM
 
 
 ## Check OS
-if [[ "$OSTYPE" != 'darwin'* ]]
+if [[ "${OSTYPE}" != 'darwin'* ]]
 then
-	printf "$erroEMsg" 'OS not supported' 'macOS' 'darwin'
-	exit 1
+	raise_error 'OS not supported' 'macOS' 'darwin'
 fi
 
 ## Prepare system
 if ! [[ -x "$(command -v wimlib-imagex)" ]]
 then
-	printf "$erroEMsg" 'Dependency not available' 'wimlib' 'wimlib-imagex'
-	printf '\n\t%s\n' 'E.g.: install it via Homebrew (https://brew.sh/)'
-	printf '\t\t%s\n' 'brew install wimlib'
-	exit 1
+	raise_error 'Dependency not available' 'wimlib' 'wimlib-imagex' "$(printf -- '\t%s\n\t\t%s' 'E.g.: install it via Homebrew (https://brew.sh/)' 'brew install wimlib')"
 fi
 
+## Variables
+win10ISO=$(mdfind 'win 10 .iso' | head -n 1)
+usbDrive=$(diskutil list | sed -n 's|^/dev/\(disk[0-9]*\).*|\1|p' | tail -n 1)
+usbDriveName=$(df | sed -n "s|^/dev/${usbDrive}s[0-9]*\(.*\).*|\1|p" | tail -n 1 | sed -n 's|.*/\(.*\)$|\1|p')
+
 ## Print download URL
-printf '%s\n\n' 'Download Win10 ISO file from: https://www.microsoft.com/software-download/windows10'
+printf -- '%s\n\n' 'Download Win10 ISO file from: https://www.microsoft.com/software-download/windows10'
 
 ## Ask for file path
-win10ISO=$(get_input 'Win10 ISO file path' "$win10ISO")
+win10ISO=$(get_input 'Win10 ISO file path' "${win10ISO}")
 
 ## Ask for disk name
-usbDrive=$(get_input 'USB drive disk name' "$usbDrive" "$usbDriveName")
+usbDrive=$(get_input 'USB drive disk name' "${usbDrive}" "${usbDriveName}")
 
 ## Print formatting warning
-printf "$warnMsg" 'Disk formatting leads to irrecoverable data erasure'
+printf -- "${warnMsg}" 'Disk formatting leads to irrecoverable data erasure'
 
 ## Ask for disk formatting
 eraseDisk='no'
-eraseDisk=$(get_input "Format disk '$usbDrive'? ('yes')" "$eraseDisk")
+eraseDisk=$(get_input "Format disk '${usbDrive}'? ('yes')" "${eraseDisk}")
 
 ## Format disk
-if [[ "$eraseDisk" == 'yes' ]]
+if [[ "${eraseDisk}" == 'yes' ]]
 then
-	if [[ -e "/dev/$usbDrive" ]]
+	if [[ -e "/dev/${usbDrive}" ]]
 	then
 		usbName='WIN10'
-		printf "\n$taskMsg\t\t\t\t\t\t" "Format disk '$usbDrive'"
-		diskutil eraseDisk MS-DOS "$usbName" MBR "$usbDrive" > /dev/null
+		printf -- "\n${taskMsg}\t\t\t\t\t\t" "Format disk '${usbDrive}'"
+		diskutil eraseDisk MS-DOS "${usbName}" MBR "${usbDrive}" > /dev/null
 		sleep 3
-		printf "$rsltMsg"
+		printf -- "${rsltMsg}"
 	else
-		printf "$erroMsg" 'Disk not available' "$usbDrive"
-		exit 1
+		raise_error 'Disk not available' "${usbDrive}"
 	fi
 else
-	printf "$erroMsg" 'User abortion' 'NONE'
-	exit 1
+	raise_error 'User abortion' 'NONE'
 fi
 
 ## Mount ISO
-if [[ -f "$win10ISO" ]]
+if [[ -f "${win10ISO}" ]]
 then
-	printf "$taskMsg\t" "Mount ISO '$win10ISO'"
-	volume=$(hdiutil mount "$win10ISO" | cut -f3)
+	printf -- "${taskMsg}\t" "Mount ISO '${win10ISO}'"
+	volume=$(hdiutil mount "${win10ISO}" | cut -f3)
 	sleep 3
-	printf "$rsltMsg"
+	printf -- "${rsltMsg}"
 else
-	printf "$erroMsg" 'ISO not available' "$win10ISO"
-	exit 1
+	raise_error 'ISO not available' "${win10ISO}"
 fi
 
 ## Print long-lasting copy warning
-printf "$warnMsg" 'File copy lasts several minutes (~10min)'
+printf -- "${warnMsg}" 'File copy lasts several minutes (~10min)'
 
 ## Copy files
-usbVolume="/Volumes/$usbName"
-if [[ -d "$volume" ]] && [[ -d "$usbVolume" ]]
+usbVolume="/Volumes/${usbName}"
+if [[ -d "${volume}" ]] && [[ -d "${usbVolume}" ]]
 then
 	specFile='sources/install.'
 	specFileEnd='wim'
 	specFileSEnd='swm'
-	printf "$taskMsg" "Copy files ('$volume' -> '$usbVolume')"
-	printf '...'
-	rsync -qa --exclude="$specFile$specFileEnd" "$volume/" "$usbVolume"
-	printf '1/2...'
-	if [[ -f "$volume/$specFile$specFileEnd" ]]
+	printf -- "${taskMsg}" "Copy files ('${volume}' -> '${usbVolume}')"
+	printf -- '%s' '...'
+	rsync -qa --exclude="${specFile}${specFileEnd}" -- "${volume}/" "${usbVolume}"
+	printf -- '%s' '1/2...'
+	if [[ -f "${volume}/${specFile}${specFileEnd}" ]]
 	then
-		wimlib-imagex split "$volume/$specFile$specFileEnd" "$usbVolume/$specFile$specFileSEnd" 4000 > /dev/null
+		wimlib-imagex split -- "${volume}/${specFile}${specFileEnd}" "${usbVolume}/${specFile}${specFileSEnd}" 4000 > /dev/null
 	else
-		printf "$erroMsg" 'Win10 file missing' "$volume/$specFile$specFileEnd"
-		exit 1
+		raise_error 'Win10 file missing' "${volume}/${specFile}${specFileEnd}"
 	fi
-	printf '2/2...'
+	printf -- '%s' '2/2...'
 	sleep 3
-	printf " $rsltMsg"
+	printf -- " ${rsltMsg}"
 else
-	printf "$erroMsg" 'Volume(s) not available' "$volume', '$usbVolume"
-	exit 1
+	raise_error 'Volume(s) not available' "${volume}', '${usbVolume}"
 fi
 
 ## Eject disk
-if [[ -d "$usbVolume" ]]
+if [[ -d "${usbVolume}" ]]
 then
-        printf "$taskMsg\t\t\t\t\t" "Eject disk '$usbVolume'"
-        hdiutil eject "$usbVolume" > /dev/null
-        printf "$rsltMsg"
+	printf -- "${taskMsg}\t\t\t\t\t" "Eject disk '${usbVolume}'"
+	hdiutil eject "${usbVolume}" > /dev/null
+	printf -- "${rsltMsg}"
 else
-        printf "$erroMsg" 'Disk not available' "$usbVolume"
-        exit 1
+	raise_error 'Disk not available' "${usbVolume}"
 fi
 
 ## Eject volume
-if [[ -d "$volume" ]]
+if [[ -d "${volume}" ]]
 then
-	printf "$taskMsg\t\t" "Eject volume '$volume'"
-	hdiutil eject "$volume" > /dev/null
-	printf "$rsltMsg"
+	printf -- "${taskMsg}\t\t" "Eject volume '${volume}'"
+	hdiutil eject "${volume}" > /dev/null
+	printf -- "${rsltMsg}"
 else
-	printf "$erroMsg" 'Volume not available' "$volume"
-	exit 1
+	raise_error 'Volume not available' "${volume}"
 fi
 
