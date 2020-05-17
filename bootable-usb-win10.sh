@@ -143,20 +143,36 @@ printf -- "${warnMsg}" 'File copy lasts several minutes (~10min)'
 usbVolume="/Volumes/${usbName}"
 if [[ -d "${volume}" ]] && [[ -d "${usbVolume}" ]]
 then
-	specFile='sources/install.'
-	specFileEnd='wim'
-	specFileSEnd='swm'
+	maxMBSize='4000'
 	printf -- "${taskMsg}" "Copy files ('${volume}' -> '${usbVolume}')"
 	printf -- '%s' '...'
-	rsync -qa --exclude="${specFile}${specFileEnd}" -- "${volume}/" "${usbVolume}"
-	printf -- '%s' '1/2...'
-	if [[ -f "${volume}/${specFile}${specFileEnd}" ]]
+	rsync -qa --max-size="${maxMBSize}M" -- "${volume}/" "${usbVolume}"
+	specFiles=($(find "${volume}" -type f -size "+${maxMBSize}M" 2> /dev/null))
+	if [[ ${#specFiles[@]} == 0 ]]
 	then
-		wimlib-imagex split -- "${volume}/${specFile}${specFileEnd}" "${usbVolume}/${specFile}${specFileSEnd}" 4000 > /dev/null
+		printf -- '%s' '1/1...'
 	else
-		raise_error 'Win10 file missing' "${volume}/${specFile}${specFileEnd}"
+		printf -- '%s' '1/2...'
+		specFileEnd='.wim'
+		specFileSEnd='.swm'
+		for currSpecFile in ${specFiles[@]}
+		do
+			if [[ -f "${currSpecFile}" ]]
+			then
+				currSpecFileEnd=$(printf '%s' "${currSpecFile}" | tail -n 1 | sed -n 's|.*\(\..*\)$|\1|p')
+				if [[ "${currSpecFileEnd}" == "${specFileEnd}" ]]
+				then
+					currSpecFileName=$(printf '%s' "${currSpecFile}" | tail -n 1 | sed -n "s|${volume}/\(.*\)${specFileEnd}$|\1|p")
+					wimlib-imagex split -- "${currSpecFile}" "${usbVolume}/${currSpecFileName}${specFileSEnd}" "${maxMBSize}" > /dev/null
+				else
+					raise_error 'Win10 file extension not supported' "${specFileEnd}" "at ${currSpecFile}"
+				fi
+			else
+				raise_error 'Win10 file not available' "${currSpecFile}"
+			fi
+		done
+		printf -- '%s' '2/2...'
 	fi
-	printf -- '%s' '2/2...'
 	sleep 3
 	printf -- " ${rsltMsg}"
 else
